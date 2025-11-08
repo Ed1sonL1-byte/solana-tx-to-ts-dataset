@@ -1,0 +1,23 @@
+{
+  "name": "solana-tx-to-ts-dataset",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "install": "npm ci || npm i",
+    "fetch:dune": "node src/fetch_from_dune.js",
+    "fetch:new": "node src/fetch_new_data.js",
+    "extract": "node src/extract_and_decompile_public_rpc.js",
+    "generate:manifest": "node src/generate_manifest.js out_ts manifest.jsonl",
+    "format": "npx prettier --write ."
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.4",
+    "cli-progress": "^3.12.0",
+    "p-queue": "^8.0.1"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}
