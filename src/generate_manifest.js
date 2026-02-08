@@ -11,12 +11,8 @@ const files = fs.existsSync(OUT_DIR) ? fs.readdirSync(OUT_DIR).filter(f => f.end
 const stream = fs.createWriteStream(OUT_FILE, { flags: 'w' });
 
 for (const f of files) {
-  const kind =
-    f.includes('_system') ? 'system' :
-    f.includes('_spl')    ? 'spl' :
-    f.includes('_memo')   ? 'memo' :
-    f.includes('_compute')? 'compute' :
-    f.includes('_raw')    ? 'raw' : 'unknown';
+  const match = f.match(/_([^_]+)\.ts$/);
+  const kind = match ? match[1] : 'unclassified';
   const rec = { file: path.join(OUT_DIR, f), kind };
   stream.write(JSON.stringify(rec) + "\n");
 }

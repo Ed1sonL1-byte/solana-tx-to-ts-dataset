@@ -5,14 +5,16 @@ import fs from 'fs';
 import path from 'path';
 import { Connection } from '@solana/web3.js';
 
-// RPC endpoints - configure via SOLANA_RPC_URL environment variable
-// You can specify multiple RPC endpoints separated by commas for load balancing
-// Example: SOLANA_RPC_URL="https://rpc1.example.com,https://rpc2.example.com"
 const DEFAULT_RPC_LIST = 'https://api.mainnet-beta.solana.com';
+
+const MEMO_PROGRAM_IDS = new Set([
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
+  'Memo1UhkJBfCR961GD3xbN1T1YQC7kFpFHJBF7bxTpN'
+]);
 
 const RPC_LIST = (process.env.SOLANA_RPC_URL || DEFAULT_RPC_LIST).split(',').map(s=>s.trim()).filter(Boolean);
 const SIGN_FILE = process.argv[2] || 'data/signatures.csv';
-const START_FROM_SIG = process.argv[3]; // Optional: start from specific signature
+const START_FROM_SIG = process.argv[3];
 const OUT_JSONL_DIR = path.resolve('out_jsonl');
 const OUT_TS_DIR = path.resolve('out_ts');
 
@@ -23,22 +25,21 @@ if (!fs.existsSync(SIGN_FILE)) {
 fs.mkdirSync(OUT_JSONL_DIR, { recursive: true });
 fs.mkdirSync(OUT_TS_DIR, { recursive: true });
 
-const CONCURRENCY = parseInt(process.env.CONCURRENCY || '5', 10); // Match number of RPC endpoints (5 paid RPCs)
+const CONCURRENCY = parseInt(process.env.CONCURRENCY || '5', 10);
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES || '5', 10);
-const BASE_BACKOFF_MS = 1000; // Increased from 500ms to 1000ms
-const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10); // Increased timeout
-const BATCH_DELAY_MS = parseInt(process.env.BATCH_DELAY_MS || '0', 10); // No delay between batches since we have per-RPC delays
-const PER_RPC_DELAY_MS = 300; // 0.3 second delay between requests to the same RPC
+const BASE_BACKOFF_MS = 1000;
+const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10);
+const BATCH_DELAY_MS = parseInt(process.env.BATCH_DELAY_MS || '0', 10);
+const PER_RPC_DELAY_MS = 300;
 
-let rpcIndex = -1; // Start at -1 so first call gives index 0
-const rpcStats = {}; // Track usage stats per RPC
-const rpcLastUsed = {}; // Track last request time per RPC
+let rpcIndex = -1;
+const rpcStats = {};
+const rpcLastUsed = {};
 
 async function nextRpc() {
   rpcIndex = (rpcIndex + 1) % RPC_LIST.length;
   const rpc = RPC_LIST[rpcIndex];
 
-  // Track stats
   if (!rpcStats[rpc]) {
     rpcStats[rpc] = { requests: 0, success: 0, failures: 0 };
   }
@@ -100,7 +101,6 @@ async function fetchParsedTx(sig) {
       await wait(backoff + Math.random()*100);
     } catch (e) {
       rpcStats[rpc].failures++;
-      // Special handling for 429 errors - use longer backoff
       const is429 = e.message && (e.message.includes('429') || e.message.includes('Too Many Requests'));
       const backoff = is429 ? BASE_BACKOFF_MS * Math.pow(3, attempt) : BASE_BACKOFF_MS * Math.pow(2, attempt);
       console.warn(`[warn] rpc=${rpc.replace('https://', '').slice(0, 30)} attempt=${attempt} sig=${sig.slice(0, 8)}... err=${e.message.slice(0, 50)}. backoff ${backoff}ms`);
@@ -113,10 +113,8 @@ async function fetchParsedTx(sig) {
 function renderCompleteTransactionTS(params) {
   const { sig, instructions, accounts, computeBudget } = params;
 
-  // Determine what imports we need based on instructions
   const needsSPLToken = instructions.some(i => i.programId === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
   const needsToken2022 = instructions.some(i => i.programId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-  const needsMemo = instructions.some(i => i.programId.includes('Memo'));
 
   let imports = `import {
   Transaction,
@@ -160,7 +158,6 @@ ${computeBudget ? `  // Compute budget from original transaction
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 }));
 ` : ''}
 ${instructions.map((instr, idx) => {
-  // Identify accounts that need keypairs (writable accounts that aren't the fee payer)
   const keypairAccounts = [];
   instr.keys.forEach((k, kidx) => {
     if (k.isWritable && k.isSigner && k.pubkey !== accounts[0]) {
@@ -170,7 +167,6 @@ ${instructions.map((instr, idx) => {
 
   let code = `  // Instruction ${idx + 1}: ${instr.description}\n`;
 
-  // Generate keypairs for new accounts
   keypairAccounts.forEach((_acc, accIdx) => {
     code += `  const newAccount${idx}_${accIdx} = Keypair.generate();\n`;
   });
@@ -179,7 +175,6 @@ ${instructions.map((instr, idx) => {
     programId: new PublicKey('${instr.programId}'),
     keys: [
 ${instr.keys.map((k, kidx) => {
-  // Check if this key needs a generated keypair
   const keypairIdx = keypairAccounts.findIndex(acc => acc.index === kidx);
   const pubkeyExpr = keypairIdx >= 0
     ? `newAccount${idx}_${keypairIdx}.publicKey`
@@ -190,7 +185,6 @@ ${instr.keys.map((k, kidx) => {
     data: Buffer.from('${instr.data}', 'base64')
   }));`;
 
-  // Add partial signing for generated keypairs
   if (keypairAccounts.length > 0) {
     code += `\n  // Sign with newly created accounts\n`;
     keypairAccounts.forEach((_acc, accIdx) => {
@@ -225,16 +219,13 @@ function decompileToTS(sig, parsed) {
 
   if (!instructions || instructions.length === 0) return null;
 
-  // Extract all unique accounts from the transaction
   const accountKeys = message?.accountKeys || [];
   const uniqueAccounts = new Set();
 
-  // Build detailed instruction list preserving all data
   const detailedInstructions = [];
   let computeBudget = null;
 
   for (const instr of instructions) {
-    // Extract program ID
     let programId;
     if (instr.programId && typeof instr.programId.toBase58 === 'function') {
       programId = instr.programId.toBase58();
@@ -245,23 +236,22 @@ function decompileToTS(sig, parsed) {
     } else if (instr.programIdIndex !== undefined && accountKeys[instr.programIdIndex]) {
       const pk = accountKeys[instr.programIdIndex];
       programId = (typeof pk.toBase58 === 'function') ? pk.toBase58() : pk.toString();
+    } else if (instr.program) {
+      programId = instr.program;
     } else {
-      programId = instr.program || 'unknown';
+      continue; // skip instructions with unresolvable program IDs
     }
 
     uniqueAccounts.add(programId);
 
-    // Check for compute budget instruction
     if (programId === 'ComputeBudget111111111111111111111111111111') {
-      // Try to extract compute unit limit
       if (instr.parsed?.type === 'setComputeUnitLimit') {
         computeBudget = instr.parsed.info?.units || 200000;
       }
-      continue; // Skip adding compute budget to instruction list
+      continue;
     }
 
-    // Extract instruction description
-    let description = 'Unknown instruction';
+    let description;
     if (instr.parsed) {
       description = instr.parsed.type || 'parsed instruction';
       if (instr.parsed.info) {
@@ -270,7 +260,7 @@ function decompileToTS(sig, parsed) {
         if (info.amount) description += ` (amount: ${info.amount})`;
         if (info.mint) description += ` (mint: ${info.mint.slice(0, 8)}...)`;
       }
-    } else if (programId.includes('Memo')) {
+    } else if (MEMO_PROGRAM_IDS.has(programId)) {
       description = 'Memo';
     } else if (programId === '11111111111111111111111111111111') {
       description = 'System instruction';
@@ -280,21 +270,18 @@ function decompileToTS(sig, parsed) {
       description = `Program ${programId.slice(0, 8)}... instruction`;
     }
 
-    // Extract accounts (keys) with metadata
     const keys = [];
 
     if (instr.accounts && Array.isArray(instr.accounts)) {
-      // Raw transaction format with account indices
       for (const accIdx of instr.accounts) {
         if (accountKeys[accIdx]) {
           const pk = accountKeys[accIdx];
           const pubkeyStr = (typeof pk.toBase58 === 'function') ? pk.toBase58() : pk.toString();
           uniqueAccounts.add(pubkeyStr);
 
-          // Try to determine if signer/writable from message header
           const header = message?.header || {};
           const numSigners = header.numRequiredSignatures || 0;
-          const numWritable = numSigners + (accountKeys.length - (header.numReadonlySignedAccounts || 0) - (header.numReadonlyUnsignedAccounts || 0));
+          const numWritable = accountKeys.length - (header.numReadonlySignedAccounts || 0) - (header.numReadonlyUnsignedAccounts || 0);
 
           keys.push({
             pubkey: pubkeyStr,
@@ -304,10 +291,8 @@ function decompileToTS(sig, parsed) {
         }
       }
     } else if (instr.parsed?.info) {
-      // Parsed transaction - extract from info object
       const info = instr.parsed.info;
 
-      // Common patterns for account extraction
       const accountFields = [
         { field: 'source', isSigner: true, isWritable: true },
         { field: 'destination', isSigner: false, isWritable: true },
@@ -334,11 +319,10 @@ function decompileToTS(sig, parsed) {
       }
     }
 
-    // Extract instruction data
     let data = '';
     if (instr.data) {
       if (typeof instr.data === 'string') {
-        data = instr.data; // Assume base64
+        data = instr.data;
       } else if (Buffer.isBuffer(instr.data)) {
         data = instr.data.toString('base64');
       }
@@ -352,13 +336,12 @@ function decompileToTS(sig, parsed) {
     });
   }
 
-  // Determine transaction kind based on dominant instruction type
   let kind = 'complex';
   if (detailedInstructions.length === 1) {
     const pid = detailedInstructions[0].programId;
     if (pid === '11111111111111111111111111111111') kind = 'system';
     else if (pid === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') kind = 'spl-token';
-    else if (pid.includes('Memo')) kind = 'memo';
+    else if (MEMO_PROGRAM_IDS.has(pid)) kind = 'memo';
     else kind = 'program';
   } else if (detailedInstructions.length > 1) {
     kind = `multi-${detailedInstructions.length}`;
@@ -376,12 +359,11 @@ function decompileToTS(sig, parsed) {
 
 async function run() {
   const lines = fs.readFileSync(SIGN_FILE, 'utf8').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const allSigs = lines.map(l => l.split(',')[0]).filter(l => l && !l.startsWith('#'));
+  const allSigs = lines.map(l => l.split(',')[0]).filter(l => l && !l.startsWith('#') && !l.startsWith('signature'));
 
   let sigs = allSigs;
   let skipInfo = '';
 
-  // If START_FROM_SIG is provided, find it and start from there
   if (START_FROM_SIG) {
     const startIndex = allSigs.indexOf(START_FROM_SIG);
     if (startIndex === -1) {
@@ -390,16 +372,10 @@ async function run() {
     }
     sigs = allSigs.slice(startIndex);
     skipInfo = `; starting from signature at index ${startIndex}`;
-  } else {
-    // Skip first 2000 signatures (default behavior)
-    const SKIP_COUNT = 2000;
-    sigs = allSigs.slice(SKIP_COUNT);
-    skipInfo = `; skipping first ${SKIP_COUNT}`;
   }
 
   console.log(`[info] loaded ${allSigs.length} signatures total${skipInfo}; processing ${sigs.length}; RPC pool size=${RPC_LIST.length}`);
 
-  // simple chunked concurrency without extra deps
   async function processSig(sig) {
     try {
       let parsed = isCached(sig) ? readCache(sig) : await fetchParsedTx(sig);
@@ -428,14 +404,12 @@ async function run() {
     await Promise.all(batch.map(processSig));
     i += CONCURRENCY;
 
-    // Progress report every 10 batches
     if (i % (CONCURRENCY * 10) === 0 || i >= sigs.length) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const rate = (i / elapsed).toFixed(2);
       console.log(`[progress] ${i}/${sigs.length} processed (${rate} tx/s, ${elapsed}s elapsed)`);
     }
 
-    // Add longer delay between batches to respect rate limits
     if (i < sigs.length) {
       await wait(BATCH_DELAY_MS);
     }
@@ -445,7 +419,6 @@ async function run() {
   console.log(`\n[done] Processed ${sigs.length} transactions in ${totalTime}s`);
   console.log(`[done] TS files in out_ts/, caches in out_jsonl/`);
 
-  // Show RPC statistics
   logRpcStats();
 }
 

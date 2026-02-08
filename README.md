@@ -15,7 +15,7 @@ This repo is tailored for the six target programs:
 1. Take a list of transaction signatures from Solana RPC in `data/signatures.csv`.
 2. Fetch each transaction from **public RPC**.
 3. Prefer parsed form; map known programs into high-level `@solana/web3.js` / `@solana/spl-token` calls.
-4. Fallback to a raw `TransactionInstruction` if it can’t be parsed.
+4. Fallback to a raw `TransactionInstruction` if it can't be parsed.
 5. Emit one TypeScript file per tx to `out_ts/` (each exporting `executeSkill(blockhash)`).
 6. Emit a JSONL manifest of outputs via `npm run generate:manifest`.
 
@@ -74,9 +74,9 @@ npm run generate:manifest
 
 ## Outputs
 
-- `out_ts/*.ts` — Reconstructed TypeScript code
-- `out_jsonl/*.json` — Per-signature cached raw/parsed RPC response
-- `manifest.jsonl` — Summary manifest
+- `out_ts/*.ts` -- Reconstructed TypeScript code
+- `out_jsonl/*.json` -- Per-signature cached raw/parsed RPC response
+- `manifest.jsonl` -- Summary manifest
 
 ## File Descriptions
 
@@ -105,17 +105,23 @@ npm run generate:manifest
 
 ```
 Solana RPC Node
-    ↓
+    |
+    v
 fetch_swap_transactions.js (query DEX programs)
-    ↓
+    |
+    v
 data/signatures.csv (signature list)
-    ↓
+    |
+    v
 extract_and_decompile_public_rpc.js (extract & decompile)
-    ↓
+    |
+    v
 out_ts/*.ts (TypeScript code)
-    ↓
+    |
+    v
 generate:manifest (generate manifest)
-    ↓
+    |
+    v
 manifest.jsonl (final output)
 ```
 
@@ -152,5 +158,3 @@ The RPC fetcher queries the following DEX programs:
 - `AGENT_PUBKEY_BASE58`
 - `RENT_EXEMPT_LAMPORTS` / `RENT_EXEMPT_LAMPORTS_165`
 - `MINT_BASE58`, `MINT_DECIMALS`
-
-Generated: 2025-10-20T00:51:03.379233Z

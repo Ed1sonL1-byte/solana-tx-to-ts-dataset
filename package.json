@@ -5,9 +5,6 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "install": "npm ci || npm i",
-    "fetch:dune": "node src/fetch_from_dune.js",
-    "fetch:new": "node src/fetch_new_data.js",
     "extract": "node src/extract_and_decompile_public_rpc.js",
     "generate:manifest": "node src/generate_manifest.js out_ts manifest.jsonl",
     "format": "npx prettier --write ."
